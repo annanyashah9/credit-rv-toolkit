@@ -1,0 +1,17 @@
+# Config for the synthetic fixture (scripts/make_fixture.py). Lets the whole
+# pipeline run end-to-end without the real OBAP panel.
+seed: 42
+
+paths:
+  obap_panel: data/raw/synth_panel.parquet
+
+ingest:
+  obap_column_map:
+    CUSIP: cusip
+    trd_exctn_dt: date
+    prc_clean: price
+    gspread_bp: gspread
+    mod_dur: mod_duration
+    par_volume: volume
+  fred_series:
+    sofr: SOFR

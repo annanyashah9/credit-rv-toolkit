@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "credit-rv-toolkit"
+version = "0.1.0"
+description = "Cross-sectional credit relative-value engine with a rigorous walk-forward backtest"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Ananya Shah" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scipy>=1.11",
+    "pyarrow>=14",
+    "scikit-learn>=1.4",
+    "statsmodels>=0.14",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "matplotlib>=3.8",
+    "fredapi>=0.5",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dashboard = ["streamlit>=1.31"]
+dev = ["pytest>=8.0", "ruff>=0.3", "mypy>=1.9"]
+
+[project.scripts]
+crv = "crv.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crv"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

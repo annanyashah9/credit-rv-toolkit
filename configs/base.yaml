@@ -1,0 +1,32 @@
+# Base configuration. Reproducible runs start here.
+# Phase 0 (docs/phase0-gate.md) FREEZES the values below from observed data;
+# until then these are conservative placeholders.
+
+seed: 42
+
+paths:
+  raw: data/raw
+  interim: data/interim
+  processed: data/processed
+  reference: data/reference
+  docs: docs
+  obap_panel: data/raw/stage1_osbap_0k_volume_2025.parquet
+
+ingest:
+  # Real OBAP (stage1 0k-volume) schema -> canonical names.
+  obap_column_map:
+    cusip_id: cusip
+    trd_exctn_dt: date
+    pr: price          # clean price; prfull is dirty/full
+    ytm: ytm
+    credit_spread: credit_spread
+    mod_dur: mod_duration
+    bond_maturity: maturity
+    qvolume: volume
+    prc_bid: bid
+    prc_ask: ask
+    bond_age: age
+    bond_amt_outstanding: issue_size
+    ff30num: sector_ff30
+  fred_series:
+    sofr: SOFR
