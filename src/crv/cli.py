@@ -85,6 +85,39 @@ def _cmd_phase1(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_backtest(args: argparse.Namespace) -> int:
+    """Phase 1.5 thin gate: IC at horizons + HAC + decay plot + quintile diagnostic."""
+    from crv.backtest.ic import ic_table, ic_timeseries
+    from crv.backtest.quintiles import quintile_returns, tail_loss_fraction
+    from crv.io import read_table
+    from crv.report.figures import plot_ic_decay, plot_ic_timeseries
+    from crv.report.summary import write_phase1_5_summary
+
+    cfg = load_config(args.config)
+    signal = read_table(cfg.paths.interim / "signal.parquet")
+    bt = cfg.backtest
+
+    table = ic_table(signal, horizons=tuple(bt.horizons), method=bt.ic_method,
+                     winsor_z=bt.winsor_z)
+    print(table.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+
+    cfg.paths.reports.mkdir(parents=True, exist_ok=True)
+    table.to_csv(cfg.paths.reports / "ic_table.csv", index=False)
+    decay_png = plot_ic_decay(table, cfg.paths.reports / "ic_decay.png")
+    mid = bt.horizons[len(bt.horizons) // 2]
+    ts = ic_timeseries(signal, mid, method=bt.ic_method)
+    plot_ic_timeseries(ts, mid, cfg.paths.reports / f"ic_timeseries_{mid}m.png")
+    quints = quintile_returns(signal, mid, n_quantiles=bt.n_quantiles)
+    tail_frac = tail_loss_fraction(signal, mid, n_quantiles=bt.n_quantiles)
+
+    summary = write_phase1_5_summary(cfg, table, quints, mid, tail_frac)
+    print(f"\nQuintile {mid}m (mean vs median r):")
+    print(quints.to_string(float_format=lambda v: f"{v:.5f}"))
+    print(f"cheapest-bucket tail (<-5%): {tail_frac:.1%}")
+    print(f"\nDecay plot: {decay_png}\nSummary:    {summary}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Shared options so `--config` works both before and after the subcommand.
     common = argparse.ArgumentParser(add_help=False)
@@ -102,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("spreads", _cmd_spreads, "compute G-spread + DTS on the universe"),
         ("signal", _cmd_signal, "fit naive fair value + standardized residual"),
         ("phase1", _cmd_phase1, "run universe -> spreads -> signal end to end"),
+        ("backtest", _cmd_backtest, "Phase 1.5 thin IC/HAC signal-content gate"),
     ]
     for name, fn, help_text in specs:
         sp = sub.add_parser(name, parents=[common], help=help_text)

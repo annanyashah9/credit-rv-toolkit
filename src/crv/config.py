@@ -22,6 +22,7 @@ class PathsConfig(BaseModel):
     processed: Path = Path("data/processed")
     reference: Path = Path("data/reference")
     docs: Path = Path("docs")
+    reports: Path = Path("reports")
 
     # The raw OBAP panel file the user drops in. Format inferred from suffix
     # (.csv / .parquet). Left as None until the user points us at it.
@@ -60,6 +61,15 @@ class SignalConfig(BaseModel):
     robust_scale: bool = True           # MAD-based standardization
 
 
+class BacktestConfig(BaseModel):
+    """Thin Phase-1.5 backtest settings."""
+
+    horizons: list[int] = Field(default_factory=lambda: [1, 3, 6])  # months ahead
+    n_quantiles: int = 5
+    ic_method: str = "spearman"          # rank IC; robust to z's right-skew
+    winsor_z: float = 5.0                # cap |z| for the robustness line
+
+
 class Config(BaseModel):
     """Root config object passed through the whole pipeline."""
 
@@ -68,6 +78,7 @@ class Config(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     universe: UniverseConfig = Field(default_factory=UniverseConfig)
     signal: SignalConfig = Field(default_factory=SignalConfig)
+    backtest: BacktestConfig = Field(default_factory=BacktestConfig)
 
     # Resolved at load time; not read from YAML.
     project_root: Path = Field(default=Path.cwd(), exclude=True)
@@ -76,7 +87,7 @@ class Config(BaseModel):
         """Make all paths absolute relative to project_root (idempotent)."""
         root = self.project_root
         p = self.paths
-        for field in ("raw", "interim", "processed", "reference", "docs"):
+        for field in ("raw", "interim", "processed", "reference", "docs", "reports"):
             val = getattr(p, field)
             if not val.is_absolute():
                 setattr(p, field, root / val)

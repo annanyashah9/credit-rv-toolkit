@@ -21,6 +21,7 @@ dependencies = [
     "matplotlib>=3.8",
     "fredapi>=0.5",
     "requests>=2.31",
+    "tabulate>=0.9",
 ]
 
 [project.optional-dependencies]

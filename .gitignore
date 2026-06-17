@@ -6,3 +6,4 @@ data/processed/
 *.parquet
 .env
 .ipynb_checkpoints/
+reports/
