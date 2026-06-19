@@ -70,11 +70,22 @@ class LiquidityConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    """Fair-value model selection (Phase 2a)."""
+    """Fair-value model selection (Phase 2a/2b)."""
 
-    kind: str = "peer_shrunk"           # 'naive' | 'peer_shrunk'
+    kind: str = "peer_shrunk"           # 'naive'|'peer_shrunk'|'ridge_wf'|'gbm_wf'
     asinh_scale: float = 100.0          # bp scale inside asinh transform
     shrink_k: float | None = None       # EB issuer shrinkage; None => estimate per cross-section
+
+    # Walk-forward training (ridge_wf / gbm_wf)
+    train_scheme: str = "rolling"       # 'rolling' | 'expanding'
+    train_window_months: int = 60
+    min_train_months: int = 24
+    refit_every_months: int = 3
+    ridge_alpha: float = 1.0
+    gbm: dict = Field(default_factory=lambda: {
+        "max_depth": 3, "learning_rate": 0.05, "max_iter": 300,
+        "min_samples_leaf": 200, "l2_regularization": 1.0,
+    })
 
 
 class BacktestConfig(BaseModel):

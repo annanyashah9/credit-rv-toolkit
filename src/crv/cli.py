@@ -88,7 +88,8 @@ def _cmd_signal(args: argparse.Namespace) -> int:
     if cfg.model.kind == "peer_shrunk":
         liquidity = read_table(cfg.paths.interim / "liquidity.parquet")
     sig = make_signal(spreads, liquidity, cfg)
-    out = write_stage(sig, cfg.paths.interim / "signal.parquet")
+    write_stage(sig, cfg.paths.interim / f"signal-{cfg.model.kind}.parquet")
+    out = write_stage(sig, cfg.paths.interim / "signal.parquet")  # active
     n_dates = sig["rebalance_date"].nunique() if not sig.empty else 0
     print(f"Signal ({cfg.model.kind}): {len(sig):,} residuals over {n_dates} "
           f"cross-sections -> {out}")
@@ -110,6 +111,47 @@ def _cmd_phase2a(args: argparse.Namespace) -> int:
         rc = fn(args)
         if rc != 0:
             return rc
+    return 0
+
+
+def _cmd_phase2b(args: argparse.Namespace) -> int:
+    """Generate signals for peer_shrunk / ridge_wf / gbm_wf, backtest each, and write
+    the ML-vs-linear comparison."""
+    from crv.backtest.ic import ic_table
+    from crv.backtest.quintiles import quintile_returns, tail_loss_fraction
+    from crv.io import read_table, write_stage
+    from crv.report.summary import write_phase1_5_summary, write_phase2b_comparison
+    from crv.signal import make_signal
+
+    cfg = load_config(args.config)
+    # Reuse universe/spreads/liquidity if present, else build them.
+    for name, fn in (("universe", _cmd_universe), ("spreads", _cmd_spreads),
+                     ("liquidity", _cmd_liquidity)):
+        if not (cfg.paths.interim / f"{name}.parquet").exists():
+            fn(args)
+
+    spreads = read_table(cfg.paths.interim / "spreads.parquet")
+    liquidity = read_table(cfg.paths.interim / "liquidity.parquet")
+    bt = cfg.backtest
+    mid = bt.horizons[len(bt.horizons) // 2]
+
+    results = {}
+    for kind in ("peer_shrunk", "ridge_wf", "gbm_wf"):
+        cfg.model.kind = kind
+        sig = make_signal(spreads, liquidity, cfg)
+        write_stage(sig, cfg.paths.interim / f"signal-{kind}.parquet")
+        table = ic_table(sig, horizons=tuple(bt.horizons), method=bt.ic_method,
+                         winsor_z=bt.winsor_z)
+        quints = quintile_returns(sig, mid, n_quantiles=bt.n_quantiles)
+        tail = tail_loss_fraction(sig, mid, n_quantiles=bt.n_quantiles)
+        write_phase1_5_summary(cfg, table, quints, mid, tail, model_kind=kind)
+        results[kind] = {"ic": table, "quints": quints, "tail": tail}
+        ic_mid = table.loc[table["horizon_m"] == mid, "mean_ic"].iloc[0]
+        print(f"  {kind:12s} IC{mid}m={ic_mid:.3f}  LS_mean={quints.loc['LS','mean_r']:+.4f}  "
+              f"tail={tail:.1%}")
+
+    out = write_phase2b_comparison(cfg, results, mid)
+    print(f"\nComparison: {out}")
     return 0
 
 
@@ -166,6 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("signal", _cmd_signal, "fit fair value + standardized residual (per config model)"),
         ("phase1", _cmd_phase1, "run universe -> spreads -> signal (naive)"),
         ("phase2a", _cmd_phase2a, "run universe -> spreads -> liquidity -> signal (peer-shrunk)"),
+        ("phase2b", _cmd_phase2b, "ML-vs-linear: peer_shrunk / ridge_wf / gbm_wf comparison"),
         ("backtest", _cmd_backtest, "Phase 1.5 thin IC/HAC signal-content gate"),
     ]
     for name, fn, help_text in specs:

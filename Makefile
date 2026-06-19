@@ -22,6 +22,10 @@ phase1:
 phase2a:
 	.venv/bin/crv phase2a --config configs/base.yaml
 
+# Phase 2b: ML-vs-linear walk-forward comparison -> docs/phase2b-results.md
+phase2b:
+	.venv/bin/crv phase2b --config configs/base.yaml
+
 # Phase 1.5: thin IC/HAC backtest gate -> reports/ + docs/phase1_5-results.md
 backtest:
 	.venv/bin/crv backtest --config configs/base.yaml
