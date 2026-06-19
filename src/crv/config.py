@@ -61,6 +61,22 @@ class SignalConfig(BaseModel):
     robust_scale: bool = True           # MAD-based standardization
 
 
+class LiquidityConfig(BaseModel):
+    """Phase-2a liquidity-control settings."""
+
+    window_days: int = 252              # trailing daily window for Bao gamma / Amihud
+    min_obs: int = 40                   # min daily obs in window to trust a measure
+    winsor_pct: float = 0.01            # two-sided winsorization of liquidity features
+
+
+class ModelConfig(BaseModel):
+    """Fair-value model selection (Phase 2a)."""
+
+    kind: str = "peer_shrunk"           # 'naive' | 'peer_shrunk'
+    asinh_scale: float = 100.0          # bp scale inside asinh transform
+    shrink_k: float | None = None       # EB issuer shrinkage; None => estimate per cross-section
+
+
 class BacktestConfig(BaseModel):
     """Thin Phase-1.5 backtest settings."""
 
@@ -78,6 +94,8 @@ class Config(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     universe: UniverseConfig = Field(default_factory=UniverseConfig)
     signal: SignalConfig = Field(default_factory=SignalConfig)
+    liquidity: LiquidityConfig = Field(default_factory=LiquidityConfig)
+    model: ModelConfig = Field(default_factory=ModelConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
 
     # Resolved at load time; not read from YAML.

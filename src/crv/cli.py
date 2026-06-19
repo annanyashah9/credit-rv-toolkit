@@ -63,22 +63,50 @@ def _cmd_spreads(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_liquidity(args: argparse.Namespace) -> int:
+    from crv.ingest.obap import load_panel
+    from crv.io import read_table, write_stage
+    from crv.liquidity.controls import build_liquidity_features
+
+    cfg = load_config(args.config)
+    panel = load_panel(cfg)
+    universe = read_table(cfg.paths.interim / "universe.parquet")
+    feats = build_liquidity_features(panel, universe, cfg)
+    out = write_stage(feats, cfg.paths.interim / "liquidity.parquet")
+    cov = feats[["bao_gamma", "amihud"]].notna().all(axis=1).mean()
+    print(f"Liquidity: {len(feats):,} rows, bao+amihud coverage {cov:.0%} -> {out}")
+    return 0
+
+
 def _cmd_signal(args: argparse.Namespace) -> int:
     from crv.io import read_table, write_stage
-    from crv.signal import make_naive_signal
+    from crv.signal import make_signal
 
     cfg = load_config(args.config)
     spreads = read_table(cfg.paths.interim / "spreads.parquet")
-    sig = make_naive_signal(spreads, cfg)
+    liquidity = None
+    if cfg.model.kind == "peer_shrunk":
+        liquidity = read_table(cfg.paths.interim / "liquidity.parquet")
+    sig = make_signal(spreads, liquidity, cfg)
     out = write_stage(sig, cfg.paths.interim / "signal.parquet")
     n_dates = sig["rebalance_date"].nunique() if not sig.empty else 0
-    print(f"Signal: {len(sig):,} residuals over {n_dates} cross-sections -> {out}")
+    print(f"Signal ({cfg.model.kind}): {len(sig):,} residuals over {n_dates} "
+          f"cross-sections -> {out}")
     return 0
 
 
 def _cmd_phase1(args: argparse.Namespace) -> int:
-    """Run the full Phase-1 chain: universe -> spreads -> signal."""
+    """Run the Phase-1 chain: universe -> spreads -> signal (use a naive-model config)."""
     for fn in (_cmd_universe, _cmd_spreads, _cmd_signal):
+        rc = fn(args)
+        if rc != 0:
+            return rc
+    return 0
+
+
+def _cmd_phase2a(args: argparse.Namespace) -> int:
+    """Run the Phase-2a chain: universe -> spreads -> liquidity -> signal."""
+    for fn in (_cmd_universe, _cmd_spreads, _cmd_liquidity, _cmd_signal):
         rc = fn(args)
         if rc != 0:
             return rc
@@ -110,7 +138,8 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
     quints = quintile_returns(signal, mid, n_quantiles=bt.n_quantiles)
     tail_frac = tail_loss_fraction(signal, mid, n_quantiles=bt.n_quantiles)
 
-    summary = write_phase1_5_summary(cfg, table, quints, mid, tail_frac)
+    summary = write_phase1_5_summary(cfg, table, quints, mid, tail_frac,
+                                     model_kind=cfg.model.kind)
     print(f"\nQuintile {mid}m (mean vs median r):")
     print(quints.to_string(float_format=lambda v: f"{v:.5f}"))
     print(f"cheapest-bucket tail (<-5%): {tail_frac:.1%}")
@@ -133,8 +162,10 @@ def build_parser() -> argparse.ArgumentParser:
         ("fred", _cmd_fred, "download/cache the Treasury yield curve"),
         ("universe", _cmd_universe, "build the point-in-time universe membership"),
         ("spreads", _cmd_spreads, "compute G-spread + DTS on the universe"),
-        ("signal", _cmd_signal, "fit naive fair value + standardized residual"),
-        ("phase1", _cmd_phase1, "run universe -> spreads -> signal end to end"),
+        ("liquidity", _cmd_liquidity, "compute liquidity controls (Bao gamma, Amihud, ...)"),
+        ("signal", _cmd_signal, "fit fair value + standardized residual (per config model)"),
+        ("phase1", _cmd_phase1, "run universe -> spreads -> signal (naive)"),
+        ("phase2a", _cmd_phase2a, "run universe -> spreads -> liquidity -> signal (peer-shrunk)"),
         ("backtest", _cmd_backtest, "Phase 1.5 thin IC/HAC signal-content gate"),
     ]
     for name, fn, help_text in specs:

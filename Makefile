@@ -18,6 +18,10 @@ fred:
 phase1:
 	.venv/bin/crv phase1 --config configs/base.yaml
 
+# Phase 2a: universe -> spreads -> liquidity -> peer-shrunk signal
+phase2a:
+	.venv/bin/crv phase2a --config configs/base.yaml
+
 # Phase 1.5: thin IC/HAC backtest gate -> reports/ + docs/phase1_5-results.md
 backtest:
 	.venv/bin/crv backtest --config configs/base.yaml

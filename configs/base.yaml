@@ -23,6 +23,8 @@ ingest:
     mod_dur: mod_duration
     bond_maturity: maturity
     qvolume: volume
+    dvolume: dvolume          # dollar volume, for Amihud illiquidity
+    permco: issuer            # issuer id, for peer shrinkage
     prc_bid: bid
     prc_ask: ask
     bond_age: age
