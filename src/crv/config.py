@@ -103,6 +103,13 @@ class BacktestConfig(BaseModel):
     neutralize: list[str] = Field(default_factory=lambda: ["sector", "duration", "dts"])
     ann_factor: int = 12                 # monthly -> annual
 
+    # Phase 3b
+    holding_grid: list[int] = Field(default_factory=lambda: [3, 6, 12])
+    band_enter_q: int = 4                # enter long at top quintile (0-indexed: 4 of 5)
+    band_exit_q: int = 3                 # exit only when it drops below quintile 3 (hysteresis)
+    default_window_m: int = 6            # horizon for "impending default" tagging
+    liquidity_split: str = "bao_gamma"   # liquidity feature for the premium test
+
 
 class Config(BaseModel):
     """Root config object passed through the whole pipeline."""

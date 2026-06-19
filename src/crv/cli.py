@@ -213,6 +213,91 @@ def _cmd_phase3a(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_phase3b(args: argparse.Namespace) -> int:
+    """Turnover frontier + contamination tests + real-return IC-decay."""
+    import pandas as pd
+
+    from crv.backtest import contamination as cont
+    from crv.backtest.costs import build_cost_table
+    from crv.backtest.defaults import detect_exits
+    from crv.backtest.ic import cross_sectional_ic
+    from crv.backtest.performance import summarize
+    from crv.backtest.portfolio import run_portfolio
+    from crv.backtest.returns import forward_excess_return, monthly_excess_return
+    from crv.backtest.stats import newey_west_mean
+    from crv.ingest.obap import load_panel
+    from crv.io import read_table
+    from crv.report.figures import plot_ic_decay, plot_turnover_frontier
+    from crv.report.summary import write_phase3b_results
+
+    cfg = load_config(args.config)
+    inter = cfg.paths.interim
+    for name, fn in (("universe", _cmd_universe), ("spreads", _cmd_spreads),
+                     ("liquidity", _cmd_liquidity)):
+        if not (inter / f"{name}.parquet").exists():
+            fn(args)
+    if not (inter / "signal-peer_shrunk.parquet").exists():
+        cfg.model.kind = "peer_shrunk"
+        _cmd_signal(args)
+
+    panel = load_panel(cfg)
+    spreads = read_table(inter / "spreads.parquet")
+    signal = read_table(inter / "signal-peer_shrunk.parquet")
+    liquidity = read_table(inter / "liquidity.parquet")
+    exits = detect_exits(panel, cfg)
+    costs = build_cost_table(panel, spreads, cfg)
+    r1 = monthly_excess_return(spreads, exits, cfg)
+    df = signal.merge(spreads[["cusip", "rebalance_date", "mod_duration"]],
+                      on=["cusip", "rebalance_date"], how="left")
+
+    # --- turnover frontier: holding sweep (band off) + a banded variant ----------
+    def _row(variant, book):
+        p = summarize(book, cfg)
+        turn = book["turnover"].mean()
+        be = (book["gross"].mean() / turn) if turn else float("nan")
+        return {"variant": variant, "net_ann": p["net_ann"], "gross_ann": p["gross_ann"],
+                "turnover": p["avg_turnover"], "sharpe": p["net_sharpe"],
+                "hac_t": p["net_hac_t"], "breakeven_hs": be}
+
+    rows = []
+    for h in cfg.backtest.holding_grid:
+        cfg.backtest.holding_months = h
+        rows.append(_row(f"hold{h}m", run_portfolio(df, r1, costs, cfg, "ls", band=False)))
+    cfg.backtest.holding_months = cfg.backtest.holding_grid[0]
+    rows.append(_row(f"hold{cfg.backtest.holding_grid[0]}m+band",
+                     run_portfolio(df, r1, costs, cfg, "ls", band=True)))
+    frontier = pd.DataFrame(rows)
+
+    # --- real-return IC-decay -----------------------------------------------------
+    ic_rows = []
+    for h in (1, 3, 6, 12):
+        fwd = forward_excess_return(r1, h)
+        m = signal.merge(fwd, on=["cusip", "rebalance_date"])
+        ic = cross_sectional_ic(m)
+        mean, se, t = newey_west_mean(ic, lags=h - 1)
+        ic_rows.append({"horizon_m": h, "mean_ic": mean, "hac_t": t,
+                        "n_periods": int(ic.notna().sum())})
+    real_ic = pd.DataFrame(ic_rows)
+
+    # --- contamination tests ------------------------------------------------------
+    fwd3 = forward_excess_return(r1, cfg.backtest.default_window_m)
+    impending = cont.impending_default_test(signal, fwd3, exits, cfg)
+    liq = cont.liquidity_split_test(signal, fwd3, liquidity, cfg)
+    odds = cont.default_odds_by_quantile(signal, exits, cfg)
+
+    cfg.paths.reports.mkdir(parents=True, exist_ok=True)
+    plot_turnover_frontier(frontier, cfg.paths.reports / "turnover_frontier.png")
+    plot_ic_decay(real_ic.rename(columns={"hac_t": "t_stat"}).assign(hac_se=0.0),
+                  cfg.paths.reports / "real_ic_decay.png")
+    out = write_phase3b_results(cfg, frontier, real_ic, impending, liq, odds)
+    print(frontier.round(4).to_string(index=False))
+    print(f"\nimpending: full IC {impending['ic_full']:.3f} vs "
+          f"survivors {impending['ic_survivors']:.3f} | liquidity: "
+          f"liquid {liq['ic_liquid']:.3f} vs illiquid {liq['ic_illiquid']:.3f}")
+    print(f"Results: {out}")
+    return 0
+
+
 def _cmd_backtest(args: argparse.Namespace) -> int:
     """Phase 1.5 thin gate: IC at horizons + HAC + decay plot + quintile diagnostic."""
     from crv.backtest.ic import ic_table, ic_timeseries
@@ -268,6 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("phase2a", _cmd_phase2a, "run universe -> spreads -> liquidity -> signal (peer-shrunk)"),
         ("phase2b", _cmd_phase2b, "ML-vs-linear: peer_shrunk / ridge_wf / gbm_wf comparison"),
         ("phase3a", _cmd_phase3a, "net-of-cost neutralized backtest (returns, costs, defaults)"),
+        ("phase3b", _cmd_phase3b, "turnover frontier + contamination tests + real-return decay"),
         ("backtest", _cmd_backtest, "Phase 1.5 thin IC/HAC signal-content gate"),
     ]
     for name, fn, help_text in specs:

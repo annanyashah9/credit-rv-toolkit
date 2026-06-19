@@ -59,3 +59,21 @@ def monthly_excess_return(
 
     out = m[["cusip", "rebalance_date", "r1"]].replace([np.inf, -np.inf], np.nan)
     return out.dropna(subset=["r1"])
+
+
+def forward_excess_return(r1: pd.DataFrame, horizon: int) -> pd.DataFrame:
+    """h-month forward realized excess return per (cusip, formation date) = sum of the
+    next `horizon` monthly r1 (compounding ≈ summing for small monthly returns).
+
+    Aligns on the global month ordinal (t_idx), so calendar gaps don't get summed as if
+    consecutive. Leakage-free: a window survives only if all `horizon` months exist for
+    that cusip (a default truncates the series ⇒ that window drops to NaN and is removed).
+    """
+    s = add_month_ordinal(r1)
+    ordinal_to_date = dict(enumerate(np.sort(pd.to_datetime(s["rebalance_date"]).unique())))
+    wide = s.pivot_table(index="t_idx", columns="cusip", values="r1").sort_index()
+    # Reverse rolling sum so row i = sum of rows i..i+horizon-1 (require all present).
+    fwd = wide[::-1].rolling(horizon, min_periods=horizon).sum()[::-1]
+    long = fwd.stack().rename("r_fwd").reset_index()
+    long["rebalance_date"] = long["t_idx"].map(ordinal_to_date)
+    return long[["cusip", "rebalance_date", "r_fwd"]].dropna(subset=["r_fwd"])

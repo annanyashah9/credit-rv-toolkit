@@ -49,6 +49,25 @@ def plot_equity_curves(books: dict, out_png: str | Path) -> Path:
     return out_png
 
 
+def plot_turnover_frontier(frontier: pd.DataFrame, out_png: str | Path) -> Path:
+    """Net annualized return vs monthly turnover across holding/band variants."""
+    out_png = Path(out_png)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.scatter(frontier["turnover"], frontier["net_ann"])
+    for _, r in frontier.iterrows():
+        ax.annotate(r["variant"], (r["turnover"], r["net_ann"]), fontsize=8,
+                    xytext=(4, 4), textcoords="offset points")
+    ax.axhline(0, color="grey", lw=0.8, ls="--")
+    ax.set_xlabel("avg monthly turnover")
+    ax.set_ylabel("net annualized excess return")
+    ax.set_title("Net-of-cost vs turnover frontier")
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=120)
+    plt.close(fig)
+    return out_png
+
+
 def plot_ic_timeseries(ic: pd.Series, horizon: int, out_png: str | Path) -> Path:
     """IC over time for one horizon, with a cumulative-mean overlay."""
     out_png = Path(out_png)

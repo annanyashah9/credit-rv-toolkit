@@ -76,7 +76,33 @@ def long_only_weights(zn: pd.Series, n_quantiles: int) -> pd.Series:
     return w
 
 
-def run_portfolio(df: pd.DataFrame, r1: pd.DataFrame, costs: pd.DataFrame, cfg, style: str):
+def banded_ls_weights(zn: pd.Series, n_quantiles: int, enter_q: int, exit_q: int,
+                      prev_long: set, prev_short: set) -> tuple[pd.Series, set, set]:
+    """Hysteresis L/S: enter long at the top quantile, hold until rank drops below
+    `exit_q`; symmetric for short. Reduces turnover vs re-ranking every period.
+    Returns (weights, new_long_set, new_short_set)."""
+    w = pd.Series(0.0, index=zn.index)
+    valid = zn.dropna()
+    if valid.nunique() < n_quantiles:
+        return w, set(), set()
+    q = pd.qcut(valid.rank(method="first"), n_quantiles, labels=False)
+    qmap = dict(zip(valid.index, q, strict=False))
+    short_exit = n_quantiles - 1 - exit_q
+    long_set, short_set = set(), set()
+    for c, qc in qmap.items():
+        if qc == n_quantiles - 1 or (c in prev_long and qc >= exit_q):
+            long_set.add(c)
+        elif qc == 0 or (c in prev_short and qc <= short_exit):
+            short_set.add(c)
+    if long_set:
+        w.loc[list(long_set)] = 1.0 / len(long_set)
+    if short_set:
+        w.loc[list(short_set)] = -1.0 / len(short_set)
+    return w, long_set, short_set
+
+
+def run_portfolio(df: pd.DataFrame, r1: pd.DataFrame, costs: pd.DataFrame, cfg, style: str,
+                  band: bool = False):
     """Build the overlapping book and monthly P&L for one style ('ls' or 'long_only').
 
     df: per (cusip, rebalance_date) with z, sector_ff30, mod_duration, dts.
@@ -90,11 +116,18 @@ def run_portfolio(df: pd.DataFrame, r1: pd.DataFrame, costs: pd.DataFrame, cfg, 
     hs_by = {d: g.set_index("cusip")["half_spread"] for d, g in costs.groupby("rebalance_date")}
 
     dates = sorted(df["rebalance_date"].unique())
+    by_date = {d: g.set_index("cusip") for d, g in df.groupby("rebalance_date")}
     targets, attrs = {}, {}
-    for d, g in df.groupby("rebalance_date"):
-        gi = g.set_index("cusip")
+    prev_long, prev_short = set(), set()
+    for d in dates:
+        gi = by_date[d]
         zn = neutralize_signal(gi.assign(z=gi["z"]), axes)
-        targets[d] = weight_fn(zn, nq)
+        if band and style == "ls":
+            w, prev_long, prev_short = banded_ls_weights(
+                zn, nq, bt.band_enter_q, bt.band_exit_q, prev_long, prev_short)
+            targets[d] = w
+        else:
+            targets[d] = weight_fn(zn, nq)
         attrs[d] = gi[["mod_duration", "dts"]]
 
     recent: list[pd.Series] = []

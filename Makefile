@@ -30,6 +30,10 @@ phase2b:
 phase3a:
 	.venv/bin/crv phase3a --config configs/base.yaml
 
+# Phase 3b: turnover frontier + contamination tests -> docs/phase3b-results.md
+phase3b:
+	.venv/bin/crv phase3b --config configs/base.yaml
+
 # Phase 1.5: thin IC/HAC backtest gate -> reports/ + docs/phase1_5-results.md
 backtest:
 	.venv/bin/crv backtest --config configs/base.yaml
