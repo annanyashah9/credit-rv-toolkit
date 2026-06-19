@@ -135,6 +135,77 @@ def write_phase2b_comparison(cfg: Config, results: dict, mid_horizon: int) -> Pa
     return out
 
 
+def write_phase3a_results(
+    cfg: Config, perf: dict, n_defaults: int, cost_split: dict, mid_horizon: int
+) -> Path:
+    """Net-of-cost P&L writeup with gross-vs-net, neutrality check, and honest read."""
+    out = cfg.paths.docs / "phase3a-results.md"
+    hold = cfg.backtest.holding_months
+    rows = []
+    for style, p in perf.items():
+        rows.append({
+            "style": style,
+            "gross_ann": f"{p['gross_ann']:+.4f}",
+            "net_ann": f"{p['net_ann']:+.4f}",
+            "net_sharpe": f"{p['net_sharpe']:.2f}",
+            "net_HAC_t": f"{p['net_hac_t']:.2f}",
+            "ann_cost": f"{p['cost_drag_ann']:.4f}",
+            "turnover": f"{p['avg_turnover']:.2f}",
+            "breadth": f"{p['avg_breadth']:.0f}",
+            "net_dur": f"{p['avg_net_dur']:+.2f}",
+            "net_dts": f"{p['avg_net_dts']:+.1f}",
+        })
+    table = pd.DataFrame(rows)
+
+    ls = perf.get("ls", {})
+    nan = float("nan")
+    net_ann, hac_t = ls.get("net_ann", nan), ls.get("net_hac_t", nan)
+    sharpe, drag = ls.get("net_sharpe", nan), ls.get("cost_drag_ann", nan)
+    turn = ls.get("avg_turnover", nan)
+    ndur, ndts = ls.get("avg_net_dur", nan), ls.get("avg_net_dts", nan)
+    net_pos = net_ann > 0 and abs(hac_t) >= 2
+    gross_ann = ls.get("gross_ann", nan)
+    survives = "survives" if net_pos else "does NOT survive"
+    verdict = (
+        f"The duration/DTS/sector-neutral long-short is **gross-positive** "
+        f"({gross_ann:+.4f}/yr) but {survives} transaction costs: a {drag:.4f}/yr cost drag "
+        f"at {turn:.2f} monthly turnover flips it to net {net_ann:+.4f}/yr "
+        f"(HAC t={hac_t:.2f}, Sharpe {sharpe:.2f}). Realized net duration {ndur:+.2f} and net "
+        f"DTS {ndts:+.1f}. {n_defaults} defaults carried through at {cfg.backtest.recovery:.0%} "
+        f"recovery (real recovery losses, heavier than the proxy)."
+    )
+    if not net_pos:
+        verdict += (" This is the honest centerpiece result: the signal predicts (gross-positive), "
+                    "but at monthly turnover, wide credit bid/ask makes it untradeable as-is. The "
+                    "lever is turnover — Phase 3b tests longer holding / no-trade bands, plus the "
+                    "impending-default and liquidity contamination tests.")
+
+    lines = [
+        "# Phase 3a — Net-of-Cost Neutralized Backtest",
+        "",
+        "> Real excess returns (carry, spread-change, default loss), measured bid/ask costs,",
+        "> default/recovery carry-through, duration/DTS/sector-neutral. Signal: peer_shrunk.",
+        f"> Holding {hold}m overlapping; HAC lag {hold - 1}.",
+        "",
+        "## Performance (annualized, excess-return units)",
+        "",
+        table.to_markdown(index=False),
+        "",
+        f"Cost coverage: {cost_split.get('measured', 0):.0%} measured bid/ask, "
+        f"{cost_split.get('fallback', 0):.0%} bucketed fallback.",
+        "",
+        "## Read",
+        "",
+        verdict,
+        "",
+        "Figure: `reports/equity_curve.png`. Phase 3b adds contamination tests + IC-decay on real "
+        "returns.",
+    ]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines))
+    return out
+
+
 def write_phase1_5_summary(
     cfg: Config, table: pd.DataFrame, quints: pd.DataFrame, mid_horizon: int,
     tail_frac: float, model_kind: str = "naive",

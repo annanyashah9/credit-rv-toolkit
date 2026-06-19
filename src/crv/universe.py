@@ -18,7 +18,7 @@ from crv.config import Config
 from crv.ingest.reference import pit_reference_asof
 
 REQUIRED = ["cusip", "date", "ytm", "mod_duration", "maturity", "issue_size", "sector_ff30",
-            "issuer", "age"]
+            "issuer", "age", "price"]
 
 
 def rebalance_dates(panel: pd.DataFrame, freq: str) -> pd.DatetimeIndex:
@@ -70,6 +70,7 @@ def build_candidate_universe(panel: pd.DataFrame, cfg: Config) -> pd.DataFrame:
             mod_duration=("mod_duration", "last"),
             issuer=("issuer", "last"),
             age=("age", "last"),
+            price=("price", "last"),
         )
         last["trade_freq"] = last["n_days"] / n_bdays
         keep = (
@@ -87,7 +88,7 @@ def build_candidate_universe(panel: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(
             columns=["cusip", "rebalance_date", "n_days", "trade_freq", "issue_size",
-                     "ttm", "sector_ff30", "ytm", "mod_duration", "issuer", "age"]
+                     "ttm", "sector_ff30", "ytm", "mod_duration", "issuer", "age", "price"]
         )
     return pd.concat(rows, ignore_index=True)
 

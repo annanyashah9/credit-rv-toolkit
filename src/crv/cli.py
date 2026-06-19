@@ -155,6 +155,64 @@ def _cmd_phase2b(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_phase3a(args: argparse.Namespace) -> int:
+    """Net-of-cost neutralized backtest on the peer_shrunk signal."""
+    import pandas as pd
+
+    from crv.backtest.costs import build_cost_table
+    from crv.backtest.defaults import DEFAULTED, detect_exits
+    from crv.backtest.performance import summarize
+    from crv.backtest.portfolio import run_portfolio
+    from crv.backtest.returns import monthly_excess_return
+    from crv.ingest.obap import load_panel
+    from crv.io import read_table
+    from crv.report.figures import plot_equity_curves
+    from crv.report.summary import write_phase3a_results
+
+    cfg = load_config(args.config)
+    inter = cfg.paths.interim
+    for name, fn in (("universe", _cmd_universe), ("spreads", _cmd_spreads),
+                     ("liquidity", _cmd_liquidity)):
+        if not (inter / f"{name}.parquet").exists():
+            fn(args)
+    # Ensure the peer_shrunk signal exists.
+    if not (inter / "signal-peer_shrunk.parquet").exists():
+        cfg.model.kind = "peer_shrunk"
+        _cmd_signal(args)
+
+    panel = load_panel(cfg)
+    spreads = read_table(inter / "spreads.parquet")
+    signal = read_table(inter / "signal-peer_shrunk.parquet")
+
+    exits = detect_exits(panel, cfg)
+    n_def = int((exits["exit_type"] == DEFAULTED).sum())
+    costs = build_cost_table(panel, spreads, cfg)
+    cost_split = costs["cost_source"].value_counts(normalize=True).to_dict()
+    r1 = monthly_excess_return(spreads, exits, cfg)
+
+    # Working frame: signal z + neutralization attributes from spreads.
+    df = signal.merge(spreads[["cusip", "rebalance_date", "mod_duration"]],
+                      on=["cusip", "rebalance_date"], how="left")
+
+    books, perf = {}, {}
+    for style in ("ls", "long_only"):
+        book = run_portfolio(df, r1, costs, cfg, style)
+        books[style] = book
+        perf[style] = summarize(book, cfg)
+        print(f"  {style:10s} net_ann={perf[style]['net_ann']:+.4f} "
+              f"sharpe={perf[style]['net_sharpe']:.2f} HACt={perf[style]['net_hac_t']:.2f} "
+              f"turnover={perf[style]['avg_turnover']:.2f}")
+
+    cfg.paths.reports.mkdir(parents=True, exist_ok=True)
+    plot_equity_curves(books, cfg.paths.reports / "equity_curve.png")
+    pd.concat({s: b for s, b in books.items()}, names=["style"]).to_csv(
+        cfg.paths.reports / "phase3a_perf.csv")
+    out = write_phase3a_results(cfg, perf, n_def, cost_split, cfg.backtest.horizons[1])
+    print(f"\nDefaults carried: {n_def} | cost coverage: "
+          f"{cost_split.get('measured', 0):.0%} measured\nResults: {out}")
+    return 0
+
+
 def _cmd_backtest(args: argparse.Namespace) -> int:
     """Phase 1.5 thin gate: IC at horizons + HAC + decay plot + quintile diagnostic."""
     from crv.backtest.ic import ic_table, ic_timeseries
@@ -209,6 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("phase1", _cmd_phase1, "run universe -> spreads -> signal (naive)"),
         ("phase2a", _cmd_phase2a, "run universe -> spreads -> liquidity -> signal (peer-shrunk)"),
         ("phase2b", _cmd_phase2b, "ML-vs-linear: peer_shrunk / ridge_wf / gbm_wf comparison"),
+        ("phase3a", _cmd_phase3a, "net-of-cost neutralized backtest (returns, costs, defaults)"),
         ("backtest", _cmd_backtest, "Phase 1.5 thin IC/HAC signal-content gate"),
     ]
     for name, fn, help_text in specs:

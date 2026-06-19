@@ -26,6 +26,10 @@ phase2a:
 phase2b:
 	.venv/bin/crv phase2b --config configs/base.yaml
 
+# Phase 3a: net-of-cost neutralized backtest -> docs/phase3a-results.md
+phase3a:
+	.venv/bin/crv phase3a --config configs/base.yaml
+
 # Phase 1.5: thin IC/HAC backtest gate -> reports/ + docs/phase1_5-results.md
 backtest:
 	.venv/bin/crv backtest --config configs/base.yaml

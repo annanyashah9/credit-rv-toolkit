@@ -89,12 +89,19 @@ class ModelConfig(BaseModel):
 
 
 class BacktestConfig(BaseModel):
-    """Thin Phase-1.5 backtest settings."""
+    """Backtest settings (Phase 1.5 thin gate + Phase 3 P&L)."""
 
     horizons: list[int] = Field(default_factory=lambda: [1, 3, 6])  # months ahead
     n_quantiles: int = 5
     ic_method: str = "spearman"          # rank IC; robust to z's right-skew
     winsor_z: float = 5.0                # cap |z| for the robustness line
+
+    # Phase 3 P&L
+    holding_months: int = 3              # overlapping-portfolio hold length
+    recovery: float = 0.40               # senior-unsecured default recovery (par fraction)
+    distress_floor: float = 55.0         # clean price below which an early exit = default
+    neutralize: list[str] = Field(default_factory=lambda: ["sector", "duration", "dts"])
+    ann_factor: int = 12                 # monthly -> annual
 
 
 class Config(BaseModel):
