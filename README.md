@@ -48,8 +48,25 @@ Outputs land in `data/interim/` (`universe.parquet`, `spreads.parquet`, `signal.
 `z` column is the naive cheap/rich signal. G-spread is validated against the panel's own
 `credit_spread` (r ≈ 0.9997).
 
+## One command
+
+```bash
+make all          # universe -> spreads -> liquidity -> signal -> backtest -> report
+                  # writes docs/REPORT.md + reports/run_manifest.json
+make all ARGS=    # add --with-gbm via: crv all --with-gbm   (heavy ML comparison)
+```
+
+The consolidated writeup is **[docs/REPORT.md](docs/REPORT.md)**; per-phase detail lives in the
+other `docs/*-results.md` files, and `reports/run_manifest.json` records the config and input hashes
+for reproducibility.
+
+## Headline result
+The relative-value signal has strong, persistent predictive content on realised excess returns
+(rank IC ≈ 0.14–0.17, highly significant), and the edge is robust to defaults and to liquidity — but
+it is **not profitable net of realistic credit transaction costs at any turnover**. A rigorous
+backtest separating "is there signal?" from "is it tradeable?" is the point of the project.
+
 ## Status
-- **Phase 0** — data-truth gate: done, cleared on the real panel.
-- **Phase 1** — universe + G-spread/DTS + naive residual: done, runs end-to-end, tested.
-- **Next:** Phase 1.5 (thin walk-forward backtest to validate signal content), then Phase 2
-  (liquidity controls, peer shrinkage, GBM engine).
+All phases complete (0 through 4). Remaining optional work: hand-collect the ratings/call-schedule
+CSV (`data/reference/ratings_calls.csv`) to activate the strictly bullet, rating-screened curated
+universe — the pipeline already supports it as a drop-in.

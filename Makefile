@@ -1,4 +1,12 @@
-.PHONY: install dev phase0 fred phase1 lint test fixture clean
+.PHONY: install dev phase0 fred phase1 phase2a phase2b phase3a phase3b backtest report all lint test fixture clean
+
+# Full reproducible pipeline in one command -> docs/REPORT.md + reports/run_manifest.json
+all:
+	.venv/bin/crv all --config configs/base.yaml
+
+# (Re)build the consolidated report from existing artifacts
+report:
+	.venv/bin/crv report --config configs/base.yaml
 
 install:
 	.venv/bin/pip install -e .

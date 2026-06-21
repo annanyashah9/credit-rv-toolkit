@@ -298,6 +298,55 @@ def _cmd_phase3b(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_report(args: argparse.Namespace) -> int:
+    """(Re)build the consolidated docs/REPORT.md from the produced artifacts."""
+    from crv.report.consolidated import run as build
+
+    cfg = load_config(args.config)
+    out = build(cfg)
+    print(f"Consolidated report: {out}")
+    return 0
+
+
+def _write_run_manifest(cfg) -> str:
+    """Reproducibility receipt: config + input hashes, seed, git commit, timestamp."""
+    import subprocess
+    from datetime import UTC, datetime
+
+    from crv.io import file_hash, write_manifest
+
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                                text=True, cwd=cfg.project_root).stdout.strip() or None
+    except Exception:
+        commit = None
+    payload = {
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "git_commit": commit,
+        "seed": cfg.seed,
+        "model_kind": cfg.model.kind,
+        "config": cfg.model_dump(mode="json", exclude={"project_root"}),
+        "obap_panel_sha256": file_hash(cfg.paths.obap_panel) if cfg.paths.obap_panel else None,
+    }
+    out = write_manifest(cfg.paths.reports / "run_manifest.json", payload)
+    return str(out)
+
+
+def _cmd_all(args: argparse.Namespace) -> int:
+    """Full reproducible pipeline in one command, then manifest + consolidated report."""
+    stages = [_cmd_universe, _cmd_spreads, _cmd_liquidity, _cmd_signal]
+    if getattr(args, "with_gbm", False):
+        stages.append(_cmd_phase2b)
+    stages += [_cmd_phase3a, _cmd_phase3b, _cmd_report]
+    for fn in stages:
+        rc = fn(args)
+        if rc != 0:
+            return rc
+    cfg = load_config(args.config)
+    print(f"Run manifest: {_write_run_manifest(cfg)}")
+    return 0
+
+
 def _cmd_backtest(args: argparse.Namespace) -> int:
     """Phase 1.5 thin gate: IC at horizons + HAC + decay plot + quintile diagnostic."""
     from crv.backtest.ic import ic_table, ic_timeseries
@@ -355,11 +404,16 @@ def build_parser() -> argparse.ArgumentParser:
         ("phase3a", _cmd_phase3a, "net-of-cost neutralized backtest (returns, costs, defaults)"),
         ("phase3b", _cmd_phase3b, "turnover frontier + contamination tests + real-return decay"),
         ("backtest", _cmd_backtest, "Phase 1.5 thin IC/HAC signal-content gate"),
+        ("report", _cmd_report, "(re)build the consolidated docs/REPORT.md"),
+        ("all", _cmd_all, "run the full pipeline end to end, then manifest + report"),
     ]
     for name, fn, help_text in specs:
         sp = sub.add_parser(name, parents=[common], help=help_text)
         if name == "fred":
             sp.add_argument("--refresh", action="store_true", help="re-download FRED series")
+        if name == "all":
+            sp.add_argument("--with-gbm", action="store_true",
+                            help="also run the heavy walk-forward GBM comparison (phase2b)")
         sp.set_defaults(func=fn)
 
     return p
