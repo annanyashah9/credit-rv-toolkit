@@ -1,0 +1,10 @@
+cusip,effective_date,thru_date,rating,rating_num,is_bullet,seniority,next_call_date,call_price
+# Point-in-time reference for the curated universe. One row per (cusip, rating-period).
+# effective_date / thru_date bound when a row is in effect (leave thru_date blank = still in effect).
+# rating_num: increasing numeric scale (AAA=1, AA+=2, ... ); used by universe.max_rating_num cutoff.
+# is_bullet: TRUE keeps the bond in the bullet-only universe. seniority: e.g. SR_UNSECURED.
+# next_call_date / call_price: for callables (informational in v1; OAS is out of scope).
+# --- delete the comment lines above and the two example rows below before use ---
+037833AK6,2014-01-01,,A+,5,TRUE,SR_UNSECURED,,
+459200HU8,2013-05-15,2020-02-01,A,6,TRUE,SR_UNSECURED,,
+459200HU8,2020-02-01,,A-,7,TRUE,SR_UNSECURED,,

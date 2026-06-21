@@ -34,7 +34,7 @@ def load_reference(path: str | Path) -> pd.DataFrame:
     path = Path(path)
     if not path.exists():
         return empty_reference()
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, comment="#", skip_blank_lines=True)
     if df.empty:
         return empty_reference()
     for col in ("effective_date", "thru_date", "next_call_date"):

@@ -1,72 +1,107 @@
 # credit-rv-toolkit
 
-A cross-sectional **credit relative-value engine** for US corporate bonds: fit a fair-value
-spread model to a curated universe, flag idiosyncratic cheap/rich names as standardized
-residuals, and **rigorously backtest** whether those flags predict convergence — net of
-transaction costs, neutral to rates and credit beta, and tested for liquidity-premium and
-impending-default contamination.
+A cross-sectional **credit relative-value engine** for US corporate bonds. It fits a fair-value
+spread curve across a curated universe, flags idiosyncratic cheap/rich names as standardized
+residuals, and then puts that signal through a deliberately demanding backtest — net of transaction
+costs, neutral to rates and credit beta, with defaulted names carried through at recovery, and
+tested for liquidity-premium and impending-default contamination.
 
-The backtest is the centerpiece. The fair-value engine is run two ways — a transparent
-linear/peer-shrunk model and a gradient-boosted model — and the backtest adjudicates which
-produces the better out-of-sample, cost-aware, risk-neutralized signal.
+The backtest is the centerpiece, not the screen. The guiding question is not whether the signal
+*correlates* with future returns, but whether trading it would actually have made money.
 
-- Plan & architecture: [docs/PLAN.md](docs/PLAN.md)
-- Data-truth gate (run this first): [docs/phase0-gate.md](docs/phase0-gate.md)
+## Headline result
 
-## Data sources (all free)
-- **Open Source Bond Asset Pricing** panel — cleaned prices/yields/spreads/duration.
-- **FRED** — SOFR and Treasury curves.
-- **FINRA Fixed Income Data Center** — per-bond reference (calibration only, not a pipeline stage).
-- **Hand-collected CSV** — ratings & call schedules for the curated universe
-  (`data/reference/ratings_calls.csv`, PIT-ready schema).
+The relative-value signal has strong, persistent predictive content on realised excess returns
+(rank IC ≈ 0.14–0.17 across 1–12 month horizons, Newey–West *t* up to 13), and the edge is robust to
+both defaults and liquidity. Yet the duration-, DTS-, and sector-neutral long-short is **not
+profitable net of realistic credit transaction costs at any turnover** — gross +1.5%/yr is overcome
+by a ~2.3%/yr cost drag. The project's value is the clean separation of two questions a cheap/rich
+screen usually conflates: *is there signal?* (yes) and *is it tradeable?* (no, costs dominate). Full
+writeup in **[docs/REPORT.md](docs/REPORT.md)**.
 
-## Setup
+## Pipeline
+
+```mermaid
+flowchart LR
+    OBAP[OBAP daily panel] --> P0[phase0: data-truth gate]
+    P0 --> U[universe<br/>point-in-time inclusion]
+    FRED[FRED Treasury curve] --> S
+    U --> S[spreads<br/>G-spread + DTS]
+    S --> L[liquidity<br/>Bao gamma, Amihud, ...]
+    L --> SIG[signal<br/>asinh + liquidity-controlled<br/>peer-shrunk residual z]
+    SIG --> BT[backtest<br/>excess returns, costs,<br/>default carry, neutralized L/S]
+    BT --> REP[REPORT.md + run manifest]
+```
+
+Each stage reads and writes versioned parquet in `data/interim/`, and the whole thing is
+reproducible from one command.
+
+## Quickstart
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+
+# 1. Download the OBAP panel into data/raw/ and set paths.obap_panel in configs/base.yaml
+# 2. Verify the data (writes docs/phase0-findings.md):
+crv phase0 --config configs/base.yaml
+# 3. Run everything end-to-end (writes docs/REPORT.md + reports/run_manifest.json):
+make all                       # ~2 min;  add the ML comparison with:  crv all --with-gbm
 ```
 
-## Phase 0 — verify your data before building anything
-1. Download the OBAP panel into `data/raw/` (csv or parquet).
-2. Set `paths.obap_panel` in `configs/base.yaml`.
-3. Run the inventory:
-   ```bash
-   crv phase0 --config configs/base.yaml
-   ```
-   This writes `docs/phase0-findings.md`: detected frequency, column roles, coverage, and a
-   suggested PASS/BRANCH for each gate check. Resolve the MANUAL items by hand, confirm the
-   column roles into `ingest.obap_column_map`, then freeze the configs. Only then does Phase 1
-   start. See [docs/phase0-gate.md](docs/phase0-gate.md).
+Individual stages are also exposed: `crv fred | universe | spreads | liquidity | signal | phase3a |
+phase3b | report`. See `crv --help`.
 
-## Phase 1 — universe, spreads, naive signal
-After the gate clears, build the bottom of the pipeline:
-```bash
-crv fred       # cache Treasury curve (keyless FRED)
-crv phase1     # universe -> spreads (G-spread + DTS) -> naive fair-value residual
+## How it works
+
+- **Universe** — rebuilt at each month-end from panel-derivable rules (issue-size floor, trade
+  frequency, maturity band), so it is point-in-time and survivorship-safe.
+- **Fair value** — spread modelled on term, sector, and liquidity (Bao–Pan–Wang gamma, Amihud, trade
+  frequency, age, size) in `asinh` space, so the residual is liquidity-neutral by construction.
+  Empirical-Bayes shrinkage pulls each issuer's curve toward its sector peers. Three engines share a
+  common interface — the cross-sectional peer-shrunk model and walk-forward ridge / gradient-boosted
+  baselines — so "does ML beat linear?" is answered apples-to-apples (it does not, materially).
+- **Backtest** — realised excess returns (carry − duration×Δspread − default loss), transaction costs
+  from measured bid/ask, overlapping (Jegadeesh–Titman) duration/DTS/sector-neutral portfolios,
+  Newey–West errors, a net-of-cost turnover frontier, and contamination tests.
+
+## Data sources (all free)
+
+- **Open Source Bond Asset Pricing** ([openbondassetpricing.com](https://openbondassetpricing.com)) —
+  cleaned daily prices, yields, spreads, duration, bid/ask, volume.
+- **FRED** — Treasury constant-maturity curve and SOFR (keyless download).
+- **Hand-collected CSV** — ratings, call schedules, and seniority for the curated universe; see below.
+
+## Repository layout
+
 ```
-Outputs land in `data/interim/` (`universe.parquet`, `spreads.parquet`, `signal.parquet`). The
-`z` column is the naive cheap/rich signal. G-spread is validated against the panel's own
-`credit_spread` (r ≈ 0.9997).
-
-## One command
-
-```bash
-make all          # universe -> spreads -> liquidity -> signal -> backtest -> report
-                  # writes docs/REPORT.md + reports/run_manifest.json
-make all ARGS=    # add --with-gbm via: crv all --with-gbm   (heavy ML comparison)
+src/crv/
+  config.py          typed, YAML-driven configuration
+  ingest/            OBAP loader + Phase-0 inventory, FRED, reference CSV
+  universe.py        point-in-time inclusion engine
+  spreads/           G-spread, DTS, curve interpolation
+  liquidity/         Bao gamma, Amihud, control-feature assembly
+  fairvalue/         asinh transform, features, EB shrinkage, linear + GBM models
+  backtest/          windows, returns, costs, defaults, portfolio, performance, contamination, IC
+  report/            figures, per-phase summaries, consolidated REPORT.md
+  cli.py             `crv` entry point
+docs/                PLAN.md, phase0-gate.md, per-phase *-results.md, REPORT.md
+configs/             base.yaml (frozen by the Phase-0 findings)
+tests/               unit + golden-path tests
 ```
 
-The consolidated writeup is **[docs/REPORT.md](docs/REPORT.md)**; per-phase detail lives in the
-other `docs/*-results.md` files, and `reports/run_manifest.json` records the config and input hashes
-for reproducibility.
+## Activating the curated universe (optional)
 
-## Headline result
-The relative-value signal has strong, persistent predictive content on realised excess returns
-(rank IC ≈ 0.14–0.17, highly significant), and the edge is robust to defaults and to liquidity — but
-it is **not profitable net of realistic credit transaction costs at any turnover**. A rigorous
-backtest separating "is there signal?" from "is it tradeable?" is the point of the project.
+v1 runs on a candidate pool from panel-derivable rules. To enforce the strictly bullet,
+rating-screened, seniority-aware universe, fill in the hand-collected reference — the pipeline picks
+it up as a drop-in, no code changes:
 
-## Status
-All phases complete (0 through 4). Remaining optional work: hand-collect the ratings/call-schedule
-CSV (`data/reference/ratings_calls.csv`) to activate the strictly bullet, rating-screened curated
-universe — the pipeline already supports it as a drop-in.
+1. Copy `data/reference/ratings_calls_template.csv` to `data/reference/ratings_calls.csv` and
+   populate one (point-in-time) row per bond.
+2. Set `universe.max_rating_num` in `configs/base.yaml` to your distressed cutoff.
+3. Re-run `make all`. Bullet-only / rating-tier / seniority filters activate automatically.
+
+## Reproducibility
+
+`reports/run_manifest.json` records the config, the OBAP panel SHA-256, the git commit, and the seed
+for every full run. `make all` regenerates all artifacts from scratch.
